@@ -2,6 +2,8 @@
 
 An app used for switching between versions of Hitman without installing the game from scratch. It uses the [DepotDownloader](https://github.com/SteamRE/DepotDownloader) to determine which game files have changed, and then installs them.
 
+Currently this only works for Steam and Windows.
+
 You must own the game on the Steam account you sign in with.
 
 ## Downloading
