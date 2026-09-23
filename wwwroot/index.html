@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hitman WoA Version Switcher</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <header>
+    <h1>Hitman WoA Version Switcher</h1>
+  </header>
+  <div class="container">
+    <div class="left-panel">
+      <dl class="status-list">
+        <dt>Install</dt><dd id="status-install">not set</dd>
+        <dt>DepotDownloader</dt><dd id="status-tool">not set</dd>
+        <dt>Version</dt><dd id="status-version">unknown</dd>
+        <dt>Steam</dt><dd id="status-store">not signed in</dd>
+      </dl>
+      <p class="fine" id="setup-hint">Set an install folder and a DepotDownloader folder before signing in or switching.</p>
+      <form id="settings-form">
+        <div class="group">
+          <span class="group-label">Install directory (Required)</span>
+          <p class="fine">Choose the folder that contains the Retail folder, Runtime folder, and the Launcher.exe. An empty folder is fine for a first time install</p>
+          <p class="fine warn" id="install-anew" hidden>This folder doesn't exist yet, it will be created and the game will be installed here</p>
+          <label>
+            <input id="install-dir" type="text" spellcheck="false" placeholder="C:\HitmanDownpatch" autocomplete="off">
+          </label>
+          <div class="row">
+            <button type="button" id="btn-browse-dir">Browse</button>
+          </div>
+        </div>
+        <div class="group">
+          <span class="group-label">DepotDownloader (Required)</span>
+          <p class="fine">Choose the folder that contains DepotDownloader.exe, An empty folder is fine if you don't have it yet, just select a folder and click install afterwards</p>
+          <p class="fine warn" id="tool-anew" hidden>This folder doesn't exist yet. Click Install to create the folder and install it there</p>
+          <label>
+            <input id="tool-path" type="text" spellcheck="false" placeholder="C:\DepotDownloader" autocomplete="off">
+          </label>
+          <div class="row">
+            <button type="button" id="btn-tool-browse">Browse</button>
+            <button type="button" id="btn-tool-download">Install</button>
+          </div>
+        </div>
+        <div id="steam-login">
+          <span class="group-label">Steam</span>
+          <label>
+            Steam username
+            <input id="username" type="text" spellcheck="false" autocomplete="username">
+          </label>
+          <label>
+            Steam password (not stored)
+            <input id="password" type="password" autocomplete="current-password">
+          </label>
+          <button type="button" id="btn-login">Log in</button>
+          <button type="button" id="btn-qr">Log in via QR code</button>
+        </div>
+      </form>
+      <button type="button" id="btn-open">Open install folder</button>
+    </div>
+    <div class="main-content">
+      <section class="card prompt" id="prompt-card" hidden>
+        <h2 id="prompt-title">Sign in</h2>
+        <p id="prompt-body"></p>
+        <canvas id="qr-canvas" hidden></canvas>
+        <p class="fine" id="qr-wait" hidden>Waiting for the QR code...</p>
+      </section>
+
+      <section class="card" id="job-card" hidden>
+        <div class="card-head">
+          <h2 id="job-title">Working</h2>
+          <button type="button" class="danger" id="btn-cancel">Cancel</button>
+        </div>
+        <p id="job-cmd" class="mono"></p>
+        <div class="meter" id="meter" hidden><span id="meter-bar"></span></div>
+        <p id="job-error" class="error" hidden></p>
+      </section>
+
+      <section class="card">
+        <h2>Patches</h2>
+        <div id="patches" class="patches"></div>
+        <div class="custom">
+          <input id="custom-manifest" type="text" spellcheck="false" placeholder="Custom manifest ID" autocomplete="off">
+          <button type="button" id="btn-custom">Switch to custom</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Log</h2>
+        <pre id="log" class="log"></pre>
+      </section>
+    </div>
+  </div>
+  <dialog id="confirm">
+    <form method="dialog">
+      <h3 id="confirm-title">Switch version?</h3>
+      <menu>
+        <button value="cancel">Cancel</button>
+        <button value="ok" id="confirm-ok">Switch</button>
+      </menu>
+    </form>
+  </dialog>
+  <script src="/app.js"></script>
+</body>
+</html>

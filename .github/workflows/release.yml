@@ -1,0 +1,31 @@
+name: Windows build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Publish Windows build
+        run: >
+          dotnet publish -c Release -r win-x64 --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:DebugType=none
+          -p:DebugSymbols=false
+          -o artifacts/win-x64
+
+      - name: Zip
+        run: Compress-Archive -Path artifacts/win-x64/HitmanPatchChanger.exe -DestinationPath HitmanPatchChanger-win-x64.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HitmanPatchChanger-win-x64
+          path: HitmanPatchChanger-win-x64.zip

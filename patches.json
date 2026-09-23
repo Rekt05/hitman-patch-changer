@@ -1,0 +1,33 @@
+{
+  "appId": 1847520,
+  "depotId": 1659041,
+  "steamAppId": 1659040,
+  "patches": [
+    { "id": "3.280", "version": "3.280", "steamManifestId": "5408453574472182733" },
+    { "id": "3.270.1", "version": "3.270.1", "steamManifestId": "8577875111335820028" },
+    { "id": "3.270.0", "version": "3.270.0", "steamManifestId": "5604189710016205281" },
+    { "id": "3.260.1", "version": "3.260.1", "steamManifestId": "3082065360189430621" },
+    { "id": "3.250", "version": "3.250", "steamManifestId": "9210823321173687524" },
+    { "id": "3.240.3", "version": "3.240.3", "steamManifestId": "4291319238449960041" },
+    { "id": "3.240.1", "version": "3.240.1", "steamManifestId": "8609847986114318815" },
+    { "id": "3.230.1", "version": "3.230.1", "steamManifestId": "3672902092979765206" },
+    { "id": "3.230.0", "version": "3.230.0", "steamManifestId": "6711704740148543453" },
+    { "id": "3.220.2", "version": "3.220.2", "steamManifestId": "2672127975667806282" },
+    { "id": "3.220.0", "version": "3.220.0", "steamManifestId": "8600814998895655653" },
+    { "id": "3.210.2", "version": "3.210.2", "steamManifestId": "1007177791479719056" },
+    { "id": "3.210.1", "version": "3.210.1", "steamManifestId": "3369603310032422544" },
+    { "id": "3.200", "version": "3.200", "steamManifestId": "1304651127213885772" },
+    { "id": "3.190", "version": "3.190", "steamManifestId": "3342871334266827735" },
+    { "id": "3.180", "version": "3.180", "steamManifestId": "2691824735524352346" },
+    { "id": "3.170.1", "version": "3.170.1", "steamManifestId": "583463383929905977" },
+    { "id": "3.160", "version": "3.160", "steamManifestId": "413982561460909428" },
+    { "id": "3.150.1", "version": "3.150.1", "steamManifestId": "8964670781144179508" },
+    { "id": "3.140", "version": "3.140", "steamManifestId": "8905605137959754095" },
+    { "id": "3.130", "version": "3.130", "steamManifestId": "182129136748469362" },
+    { "id": "3.120", "version": "3.120", "steamManifestId": "1587269672222714171" },
+    { "id": "3.110", "version": "3.110", "steamManifestId": "2244167751737065138" },
+    { "id": "3.100-c", "version": "3.100", "steamManifestId": "8924469489751784366" },
+    { "id": "3.100-b", "version": "3.100", "steamManifestId": "3616963494886024195" },
+    { "id": "3.100", "version": "3.100", "steamManifestId": "3902189938284110581" }
+  ]
+}
