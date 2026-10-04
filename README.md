@@ -10,6 +10,8 @@ You must own the game on the Steam account you sign in with.
 
 Download the latest zip from Releases, extract it, and double click the HitmanPatchChanger.exe.
 
+This will open a command prompt window (do not close this until you are done) and should automatically open a tab in your browser, if it didn't, scroll to the top of that command prompt window and follow the link listed there.
+
 ## How to use (already downpatched)
 
 1. Set an install directory. This location is where you have the downpatched game installed.
