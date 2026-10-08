@@ -51,6 +51,7 @@ public sealed class UiState
     public string? ToolPath { get; set; }
     public SessionSnapshot Session { get; set; } = new();
     public string ListenUrl { get; set; } = "http://127.0.0.1:3847";
+    public string Platform { get; set; } = "";
 }
 
 public sealed class LogLine
@@ -243,14 +244,22 @@ public sealed class DepotClient : IDisposable
         }
     }
 
+    static IEnumerable<string> AccountConfigRoots()
+    {
+        var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData, Environment.SpecialFolderOption.DoNotVerify);
+        if (!string.IsNullOrWhiteSpace(local))
+            yield return Path.Combine(local, "IsolatedStorage");
+        var roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData, Environment.SpecialFolderOption.DoNotVerify);
+        if (!string.IsNullOrWhiteSpace(roaming))
+            yield return Path.Combine(roaming, ".isolated-storage");
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile, Environment.SpecialFolderOption.DoNotVerify);
+        if (!string.IsNullOrWhiteSpace(home))
+            yield return Path.Combine(home, ".isolated-storage");
+    }
+
     static string? FindAccountConfig()
     {
-        var roots = new[]
-        {
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "IsolatedStorage"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".isolated-storage")
-        };
-        foreach (var root in roots)
+        foreach (var root in AccountConfigRoots())
         {
             if (!Directory.Exists(root)) continue;
             try
@@ -267,7 +276,7 @@ public sealed class DepotClient : IDisposable
 
     public void UseToolDir(string path)
     {
-        path = path.Trim().Trim('"');
+        path = Paths.ExpandHome(path);
         if (path.Length == 0) throw new InvalidOperationException("Choose a DepotDownloader directory first.");
         string dir;
         if (File.Exists(path)) dir = Path.GetDirectoryName(Path.GetFullPath(path))
@@ -278,7 +287,12 @@ public sealed class DepotClient : IDisposable
         cfg.ToolDir = dir;
         ConfigStore.Save(cfg);
         if (File.Exists(path) && !string.Equals(Path.GetFullPath(path), Path.Combine(dir, Path.GetFileName(path)), StringComparison.OrdinalIgnoreCase))
-            File.Copy(path, Path.Combine(dir, OperatingSystem.IsWindows() ? "DepotDownloader.exe" : "DepotDownloader"), overwrite: true);
+        {
+            var destName = OperatingSystem.IsWindows()
+                ? "DepotDownloader.exe"
+                : (path.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) ? "DepotDownloader.dll" : "DepotDownloader");
+            File.Copy(path, Path.Combine(dir, destName), overwrite: true);
+        }
         if (!ProbeBinary())
         {
             _toolStatus = ToolStatus.Missing;
@@ -581,9 +595,9 @@ public sealed class DepotClient : IDisposable
 
         var home = ToolHome() ?? throw new InvalidOperationException("Choose a DepotDownloader directory first.");
         Directory.CreateDirectory(home);
+        EnsureExecutable(_toolPath!);
         var psi = new ProcessStartInfo
         {
-            FileName = _toolPath!,
             WorkingDirectory = home,
             UseShellExecute = false,
             RedirectStandardInput = true,
@@ -593,6 +607,7 @@ public sealed class DepotClient : IDisposable
             StandardOutputEncoding = Encoding.UTF8,
             StandardErrorEncoding = Encoding.UTF8
         };
+        SetToolCommand(psi, _toolPath!);
         foreach (var a in args) psi.ArgumentList.Add(a);
 
         var proc = new Process { StartInfo = psi, EnableRaisingEvents = true };
@@ -893,9 +908,10 @@ public sealed class DepotClient : IDisposable
     static bool TryLaunch(string exe, out string? version)
     {
         version = null;
+        EnsureExecutable(exe);
         try
         {
-            var psi = new ProcessStartInfo(exe, "-V")
+            var psi = new ProcessStartInfo
             {
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
@@ -903,6 +919,8 @@ public sealed class DepotClient : IDisposable
                 CreateNoWindow = true,
                 WorkingDirectory = Path.GetDirectoryName(exe) ?? ""
             };
+            SetToolCommand(psi, exe);
+            psi.ArgumentList.Add("-V");
             using var p = Process.Start(psi);
             if (p == null) return false;
             var stdout = p.StandardOutput.ReadToEndAsync();
@@ -943,7 +961,9 @@ public sealed class DepotClient : IDisposable
         if (!Directory.Exists(dir) || FindLocalBinary(dir) == null)
             return null;
         if (!ProbeBinary())
-            return "DepotDownloader did not start. Install the .NET runtime, or download it again.";
+            return OperatingSystem.IsLinux()
+                ? "DepotDownloader did not start. Click Install to download the Linux build, or point this at a folder that already contains that binary."
+                : "DepotDownloader did not start. Install the .NET runtime, or download it again.";
         return null;
     }
 
@@ -953,6 +973,30 @@ public sealed class DepotClient : IDisposable
     {
         var dir = ConfigStore.Load().ToolDir;
         return string.IsNullOrWhiteSpace(dir) ? null : dir.Trim();
+    }
+
+    static void SetToolCommand(ProcessStartInfo psi, string toolPath)
+    {
+        if (!OperatingSystem.IsWindows() && toolPath.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+        {
+            psi.FileName = "dotnet";
+            psi.ArgumentList.Add(toolPath);
+            return;
+        }
+        psi.FileName = toolPath;
+    }
+
+    static void EnsureExecutable(string path)
+    {
+        if (OperatingSystem.IsWindows() || path.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)) return;
+        try
+        {
+            var mode = File.GetUnixFileMode(path);
+            const UnixFileMode exec = UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute;
+            if ((mode & UnixFileMode.UserExecute) != 0) return;
+            File.SetUnixFileMode(path, mode | exec);
+        }
+        catch { }
     }
 
     static string? FindLocalBinary(string? dir)
@@ -976,9 +1020,12 @@ public sealed class DepotClient : IDisposable
                 ? "DepotDownloader-windows-arm64.zip"
                 : "DepotDownloader-windows-x64.zip";
         if (OperatingSystem.IsLinux())
-            return RuntimeInformation.ProcessArchitecture == Architecture.Arm64
-                ? "DepotDownloader-linux-arm64.zip"
-                : "DepotDownloader-linux-x64.zip";
+            return RuntimeInformation.ProcessArchitecture switch
+            {
+                Architecture.Arm64 => "DepotDownloader-linux-arm64.zip",
+                Architecture.Arm => "DepotDownloader-linux-arm.zip",
+                _ => "DepotDownloader-linux-x64.zip"
+            };
         if (OperatingSystem.IsMacOS())
             return RuntimeInformation.ProcessArchitecture == Architecture.Arm64
                 ? "DepotDownloader-macos-arm64.zip"
@@ -996,7 +1043,7 @@ public sealed class DepotClient : IDisposable
             var existing = File.ReadAllText(path).Trim();
             if (existing == cfg.SteamAppId.ToString()) return;
         }
-        File.WriteAllText(path, cfg.SteamAppId.ToString());
+        File.WriteAllText(path, cfg.SteamAppId.ToString() + "\n");
     }
 
     static bool IsQrArt(string line)

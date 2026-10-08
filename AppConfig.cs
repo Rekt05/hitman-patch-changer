@@ -36,13 +36,25 @@ public sealed class PatchFile
 public static class Paths
 {
     public static string DataDir { get; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData, Environment.SpecialFolderOption.Create),
         "HitmanPatchChanger");
 
     public static string ConfigPath => Path.Combine(DataDir, "config.json");
     public static string DepotDownloaderFolder => Path.Combine(DataDir, "depotdownloader");
     public static string LoginScratch => Path.Combine(DataDir, "login-scratch");
     public static string ConfigLock { get; } = Path.Combine(DataDir, "config.lock");
+
+    public static string ExpandHome(string path)
+    {
+        path = path.Trim().Trim('"');
+        if (path.Length == 0) return path;
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile, Environment.SpecialFolderOption.DoNotVerify);
+        if (string.IsNullOrWhiteSpace(home)) return path;
+        if (path == "~") return home;
+        if (path.StartsWith("~/", StringComparison.Ordinal) || path.StartsWith("~\\", StringComparison.Ordinal))
+            return Path.Combine(home, path[2..]);
+        return path;
+    }
 
     public static readonly JsonSerializerOptions Json = new()
     {

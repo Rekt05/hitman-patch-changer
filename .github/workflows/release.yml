@@ -1,11 +1,21 @@
-name: Windows build
+name: Release builds
 
 on:
   workflow_dispatch:
 
 jobs:
-  windows:
-    runs-on: windows-latest
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+            binary: HitmanPatchChanger.exe
+          - os: ubuntu-latest
+            rid: linux-x64
+            binary: HitmanPatchChanger
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -13,19 +23,26 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
-      - name: Publish Windows build
+      - name: Publish
         run: >
-          dotnet publish -c Release -r win-x64 --self-contained true
+          dotnet publish -c Release -r ${{ matrix.rid }} --self-contained true
           -p:PublishSingleFile=true
           -p:IncludeNativeLibrariesForSelfExtract=true
           -p:DebugType=none
           -p:DebugSymbols=false
-          -o artifacts/win-x64
+          -o artifacts/${{ matrix.rid }}
 
-      - name: Zip
-        run: Compress-Archive -Path artifacts/win-x64/HitmanPatchChanger.exe -DestinationPath HitmanPatchChanger-win-x64.zip
+      - name: Zip (Windows)
+        if: runner.os == 'Windows'
+        run: Compress-Archive -Path artifacts/${{ matrix.rid }}/${{ matrix.binary }} -DestinationPath HitmanPatchChanger-${{ matrix.rid }}.zip
+
+      - name: Zip (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          chmod +x artifacts/${{ matrix.rid }}/${{ matrix.binary }}
+          zip -j HitmanPatchChanger-${{ matrix.rid }}.zip artifacts/${{ matrix.rid }}/${{ matrix.binary }}
 
       - uses: actions/upload-artifact@v4
         with:
-          name: HitmanPatchChanger-win-x64
-          path: HitmanPatchChanger-win-x64.zip
+          name: HitmanPatchChanger-${{ matrix.rid }}
+          path: HitmanPatchChanger-${{ matrix.rid }}.zip

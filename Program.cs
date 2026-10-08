@@ -26,14 +26,7 @@ depot.ProbeBinary();
 
 Console.WriteLine("Hitman WoA Version Switcher");
 Console.WriteLine($"Opens: {url}");
-try
-{
-    Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
-}
-catch
-{
-    Console.WriteLine("Could not open a browser automatically - open the URL above.");
-}
+OpenBrowser(url);
 
 app.Lifetime.ApplicationStopping.Register(() =>
 {
@@ -84,13 +77,13 @@ static WebApplication Build(string[] args, PatchFile catalog, EventHub hub, LogB
         var cfg = ConfigStore.Load();
         if (req.InstallDir != null)
         {
-            var dir = req.InstallDir.Trim().Trim('"');
+            var dir = Paths.ExpandHome(req.InstallDir);
             cfg.InstallDir = dir;
             if (req.CreateIfMissing == true && !string.IsNullOrWhiteSpace(dir))
                 Directory.CreateDirectory(dir);
         }
         if (req.Username != null) cfg.Username = req.Username.Trim();
-        if (req.ToolDir != null) cfg.ToolDir = req.ToolDir.Trim().Trim('"');
+        if (req.ToolDir != null) cfg.ToolDir = Paths.ExpandHome(req.ToolDir);
         ConfigStore.Save(cfg);
         depot.ProbeBinary();
         return Results.Json(BuildState(catalog, depot, port), Paths.Json);
@@ -215,7 +208,7 @@ static WebApplication Build(string[] args, PatchFile catalog, EventHub hub, LogB
 
     app.MapPost("/api/browse", async (BrowseRequest req) =>
     {
-        if (!OperatingSystem.IsWindows())
+        if (!OperatingSystem.IsWindows() && !OperatingSystem.IsLinux())
             return Results.Json(new { ok = false, error = "Type the path manually on this OS." }, statusCode: 400);
         if (!await BrowseGate.Lock.WaitAsync(0))
             return Results.Json(new { ok = false, error = "A picker window is already open. Check your taskbar." }, statusCode: 409);
@@ -246,12 +239,7 @@ static WebApplication Build(string[] args, PatchFile catalog, EventHub hub, LogB
             return Results.Json(new { ok = false, error = "Folder does not exist: " + path }, statusCode: 404);
         try
         {
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = OperatingSystem.IsWindows() ? "explorer.exe" : path,
-                Arguments = OperatingSystem.IsWindows() ? $"\"{path}\"" : "",
-                UseShellExecute = true
-            });
+            OpenInFileManager(path);
             return Results.Json(new { ok = true });
         }
         catch (Exception ex)
@@ -293,7 +281,8 @@ static UiState BuildState(PatchFile catalog, DepotClient depot, int port)
         DepotDownloaderVersion = depot.ToolsVersion,
         ToolPath = depot.ToolsPath,
         Session = depot.Snapshot(),
-        ListenUrl = $"http://127.0.0.1:{port}"
+        ListenUrl = $"http://127.0.0.1:{port}",
+        Platform = OperatingSystem.IsLinux() ? "linux" : OperatingSystem.IsWindows() ? "windows" : "other"
     };
 }
 
@@ -324,7 +313,146 @@ static async Task WriteSse(HttpContext ctx, string name, object payload, Cancell
     await ctx.Response.Body.FlushAsync(ct);
 }
 
-static async Task<string?> BrowseDialog(bool pickFile)
+static void OpenBrowser(string url)
+{
+    try
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+            return;
+        }
+        if (OperatingSystem.IsLinux())
+        {
+            StartDetached("xdg-open", url);
+            return;
+        }
+    }
+    catch
+    {
+        Console.WriteLine("Could not open a browser automatically - open the URL above.");
+        return;
+    }
+    Console.WriteLine("Could not open a browser automatically - open the URL above.");
+}
+
+static void OpenInFileManager(string path)
+{
+    if (OperatingSystem.IsWindows())
+    {
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = "explorer.exe",
+            Arguments = $"\"{path}\"",
+            UseShellExecute = true
+        });
+        return;
+    }
+    StartDetached("xdg-open", path);
+}
+
+static void StartDetached(string fileName, string arg)
+{
+    var psi = new ProcessStartInfo(fileName) { UseShellExecute = false };
+    psi.ArgumentList.Add(arg);
+    var proc = Process.Start(psi) ?? throw new InvalidOperationException("Could not start " + fileName + ".");
+    _ = Task.Run(async () =>
+    {
+        try { await proc.WaitForExitAsync(); }
+        finally { proc.Dispose(); }
+    });
+}
+
+static Task<string?> BrowseDialog(bool pickFile)
+{
+    if (OperatingSystem.IsWindows()) return BrowseWindowsAsync(pickFile);
+    if (OperatingSystem.IsLinux()) return BrowseLinuxAsync(pickFile);
+    return Task.FromResult<string?>(null);
+}
+
+static async Task<string?> BrowseLinuxAsync(bool pickFile)
+{
+    if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("DISPLAY"))
+        && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("WAYLAND_DISPLAY")))
+        throw new InvalidOperationException("No graphical session found. Type the path instead.");
+
+    var title = pickFile ? "Select binary" : "Select folder";
+    var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile, Environment.SpecialFolderOption.DoNotVerify);
+    var attempts = new List<(string Name, string[] Args)>();
+    if (pickFile)
+    {
+        attempts.Add(("zenity", ["--file-selection", "--title", title]));
+        attempts.Add(("qarma", ["--file-selection", "--title", title]));
+        attempts.Add(("yad", ["--file-selection", "--title", title]));
+        attempts.Add(("kdialog", ["--title", title, "--getopenfilename", home]));
+    }
+    else
+    {
+        attempts.Add(("zenity", ["--file-selection", "--directory", "--title", title]));
+        attempts.Add(("qarma", ["--file-selection", "--directory", "--title", title]));
+        attempts.Add(("yad", ["--file-selection", "--directory", "--title", title]));
+        attempts.Add(("kdialog", ["--title", title, "--getexistingdirectory", home]));
+    }
+
+    string? lastError = null;
+    var any = false;
+    foreach (var (name, args) in attempts)
+    {
+        var file = FindCommand(name);
+        if (file == null) continue;
+        any = true;
+        var (code, output, error) = await RunPicker(file, args);
+        if (code == 0)
+        {
+            var picked = output.Trim();
+            return picked.Length == 0 ? null : picked;
+        }
+        if (code == 1) return null;
+        lastError = string.IsNullOrWhiteSpace(error) ? name + " exited with code " + code : error.Trim();
+    }
+    if (!any)
+        throw new InvalidOperationException("No folder picker found. Install zenity or kdialog, or type the path.");
+    throw new InvalidOperationException(lastError ?? "Could not open a folder picker. Type the path instead.");
+}
+
+static string? FindCommand(string name)
+{
+    var pathEnv = Environment.GetEnvironmentVariable("PATH");
+    if (string.IsNullOrEmpty(pathEnv)) return null;
+    foreach (var dir in pathEnv.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+    {
+        var full = Path.Combine(dir, name);
+        if (File.Exists(full)) return full;
+    }
+    return null;
+}
+
+static async Task<(int Code, string Stdout, string Stderr)> RunPicker(string file, string[] args)
+{
+    var psi = new ProcessStartInfo(file)
+    {
+        UseShellExecute = false,
+        RedirectStandardOutput = true,
+        RedirectStandardError = true
+    };
+    foreach (var arg in args) psi.ArgumentList.Add(arg);
+    using var proc = Process.Start(psi) ?? throw new InvalidOperationException("Could not start " + Path.GetFileName(file) + ".");
+    var stdoutTask = proc.StandardOutput.ReadToEndAsync();
+    var stderrTask = proc.StandardError.ReadToEndAsync();
+    using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+    try
+    {
+        await proc.WaitForExitAsync(cts.Token);
+    }
+    catch (OperationCanceledException)
+    {
+        try { proc.Kill(entireProcessTree: true); } catch { }
+        return (1, "", "");
+    }
+    return (proc.ExitCode, await stdoutTask, await stderrTask);
+}
+
+static async Task<string?> BrowseWindowsAsync(bool pickFile)
 {
     if (!OperatingSystem.IsWindows()) return null;
     var title = pickFile ? "Select binary" : "Select folder";
@@ -349,6 +477,7 @@ static async Task<string?> BrowseDialog(bool pickFile)
 
 static string? ShowExplorerPicker(bool pickFile, string title)
 {
+    if (!OperatingSystem.IsWindows()) return null;
     var dlg = (IFileOpenDialog)new FileOpenDialog();
     const uint ForceFilesystem = 0x40;
     const uint PathMustExist = 0x800;

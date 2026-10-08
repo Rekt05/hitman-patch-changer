@@ -52,6 +52,12 @@ function applyState(s) {
   if (!s || !s.config) return;
   state.ui = s;
   const cfg = s.config;
+  const linux = s.platform === "linux";
+  element("install-dir").placeholder = linux ? "/home/you/HitmanDownpatch" : "C:\\HitmanDownpatch";
+  element("tool-path").placeholder = linux ? "/home/you/DepotDownloader" : "C:\\DepotDownloader";
+  element("tool-help").textContent = linux
+    ? "Choose the folder that contains the DepotDownloader binary from the Linux zip. An empty folder is fine if you don't have it yet, just select a folder and click Install afterwards."
+    : "Choose the folder that contains DepotDownloader.exe. An empty folder is fine if you don't have it yet, just select a folder and click Install afterwards.";
   if (document.activeElement !== element("install-dir")) element("install-dir").value = cfg.installDir || "";
   if (document.activeElement !== element("username")) element("username").value = cfg.username || "";
   const toolInput = element("tool-path");
