@@ -6,7 +6,9 @@ using System.Threading.Channels;
 using HitmanPatchChanger;
 using Microsoft.Extensions.FileProviders;
 
-var catalog = PatchCatalog.Load();
+var localCatalog = PatchCatalog.Load();
+var cachedCatalog = PatchCatalog.TryLoadCache();
+var catalog = new LiveCatalog(cachedCatalog == null ? localCatalog : PatchCatalog.Merge(localCatalog, cachedCatalog));
 var hub = new EventHub();
 var logs = new LogBuffer(hub);
 var cfg = ConfigStore.Load();
@@ -19,6 +21,7 @@ if (string.IsNullOrWhiteSpace(cfg.ToolDir)
 var port = ResolvePort(args, cfg);
 var depot = new DepotClient(hub, logs, steamLoginId: SteamLoginId(port));
 var app = Build(args, catalog, hub, logs, depot, port);
+_ = RefreshPatchList(catalog, localCatalog, hub, depot, port, app.Lifetime.ApplicationStopping);
 
 var url = $"http://127.0.0.1:{port}";
 
@@ -36,7 +39,7 @@ app.Lifetime.ApplicationStopping.Register(() =>
 
 await app.RunAsync();
 
-static WebApplication Build(string[] args, PatchFile catalog, EventHub hub, LogBuffer logs, DepotClient depot, int port)
+static WebApplication Build(string[] args, LiveCatalog catalog, EventHub hub, LogBuffer logs, DepotClient depot, int port)
 {
     var builder = WebApplication.CreateBuilder(args);
     builder.Logging.ClearProviders();
@@ -55,8 +58,8 @@ static WebApplication Build(string[] args, PatchFile catalog, EventHub hub, LogB
     app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = files });
     app.UseStaticFiles(new StaticFileOptions { FileProvider = files });
 
-    app.MapGet("/api/state", () => Results.Json(BuildState(catalog, depot, port), Paths.Json));
-    app.MapGet("/api/patches", () => Results.Json(catalog, Paths.Json));
+    app.MapGet("/api/state", () => Results.Json(BuildState(catalog.Current, depot, port), Paths.Json));
+    app.MapGet("/api/patches", () => Results.Json(catalog.Current, Paths.Json));
     app.MapGet("/api/logs", () => Results.Json(logs.Recent, Paths.Json));
 
     app.MapGet("/api/events", async (HttpContext ctx, CancellationToken ct) =>
@@ -65,10 +68,18 @@ static WebApplication Build(string[] args, PatchFile catalog, EventHub hub, LogB
         ctx.Response.Headers.CacheControl = "no-cache";
         ctx.Response.Headers["X-Accel-Buffering"] = "no";
         await ctx.Response.WriteAsync("retry: 2000\n\n", ct);
-        await WriteSse(ctx, "state", BuildState(catalog, depot, port), ct);
-        await foreach (var ev in hub.Subscribe(ct))
+        var reader = hub.Listen(ct, out var stop);
+        try
         {
-            await WriteSse(ctx, ev.Name, ev.Payload, ct);
+            var current = catalog.Current;
+            await WriteSse(ctx, "state", BuildState(current, depot, port), ct);
+            await WriteSse(ctx, "patches", current, ct);
+            await foreach (var ev in reader.ReadAllAsync(ct))
+                await WriteSse(ctx, ev.Name, ev.Payload, ct);
+        }
+        finally
+        {
+            stop();
         }
     });
 
@@ -86,7 +97,7 @@ static WebApplication Build(string[] args, PatchFile catalog, EventHub hub, LogB
         if (req.ToolDir != null) cfg.ToolDir = Paths.ExpandHome(req.ToolDir);
         ConfigStore.Save(cfg);
         depot.ProbeBinary();
-        return Results.Json(BuildState(catalog, depot, port), Paths.Json);
+        return Results.Json(BuildState(catalog.Current, depot, port), Paths.Json);
     });
 
     app.MapPost("/api/login", (LoginRequest req) =>
@@ -142,13 +153,14 @@ static WebApplication Build(string[] args, PatchFile catalog, EventHub hub, LogB
     app.MapPost("/api/switch", (SwitchRequest req) =>
     {
         var cfg = ConfigStore.Load();
+        var patches = catalog.Current;
         PatchEntry? patch = null;
         if (!string.IsNullOrWhiteSpace(req.PatchId))
-            patch = PatchCatalog.Find(catalog, req.PatchId);
+            patch = PatchCatalog.Find(patches, req.PatchId);
         if (patch == null && !string.IsNullOrWhiteSpace(req.ManifestId))
         {
             var key = req.ManifestId.Trim();
-            patch = catalog.Patches.FirstOrDefault(p => p.SteamManifestId == key)
+            patch = patches.Patches.FirstOrDefault(p => p.SteamManifestId == key)
                 ?? new PatchEntry { Id = "custom", Version = "custom", SteamManifestId = key };
         }
         if (patch == null)
@@ -198,7 +210,7 @@ static WebApplication Build(string[] args, PatchFile catalog, EventHub hub, LogB
                 depot.UseToolDir(req.Path);
             else
                 await depot.EnsureBinaryAsync();
-            return Results.Json(BuildState(catalog, depot, port), Paths.Json);
+            return Results.Json(BuildState(catalog.Current, depot, port), Paths.Json);
         }
         catch (Exception ex)
         {
@@ -249,6 +261,29 @@ static WebApplication Build(string[] args, PatchFile catalog, EventHub hub, LogB
     });
 
     return app;
+}
+
+static async Task RefreshPatchList(LiveCatalog catalog, PatchFile local, EventHub hub, DepotClient depot, int port, CancellationToken ct)
+{
+    var remote = await PatchCatalog.FetchRemoteAsync(ct);
+    if (remote == null)
+    {
+        if (!ct.IsCancellationRequested)
+            Console.WriteLine("Could not reach GitHub, using the local patch list instead.");
+        return;
+    }
+    var next = PatchCatalog.Merge(local, remote);
+    if (PatchCatalog.SameList(catalog.Current, next))
+    {
+        Console.WriteLine($"Patch list is already up to date with GitHub, there are {next.Patches.Count} versions.");
+        return;
+    }
+    catalog.Replace(next);
+    try { PatchCatalog.SaveCache(next); }
+    catch (Exception ex) { Console.WriteLine("Could not save the cached patch list - " + ex.Message); }
+    hub.Emit("patches", next);
+    hub.Emit("state", BuildState(next, depot, port));
+    Console.WriteLine($"Updated the patch list from GitHub, there are {next.Patches.Count} versions now.");
 }
 
 static async Task PrepareJobFolders(DepotClient depot, AppConfig cfg)
@@ -621,22 +656,21 @@ sealed class EventHub : ILiveEventListener
             ch.Writer.TryWrite((eventName, payload));
     }
 
-    public async IAsyncEnumerable<(string Name, object Payload)> Subscribe([System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    public ChannelReader<(string Name, object Payload)> Listen(CancellationToken ct, out Action stop)
     {
         var ch = Channel.CreateBounded<(string, object)>(new BoundedChannelOptions(200)
         {
             FullMode = BoundedChannelFullMode.DropOldest
         });
         lock (_listenerLock) _subs.Add(ch);
-        try
+        var reg = ct.Register(() => ch.Writer.TryComplete());
+        stop = () =>
         {
-            await foreach (var item in ch.Reader.ReadAllAsync(ct))
-                yield return item;
-        }
-        finally
-        {
+            reg.Dispose();
             lock (_listenerLock) _subs.Remove(ch);
-        }
+            ch.Writer.TryComplete();
+        };
+        return ch.Reader;
     }
 }
 

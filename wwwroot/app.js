@@ -361,6 +361,11 @@ async function boot() {
   applyState(ui);
   for (const line of logs) appendLog(line);
   const es = new EventSource("/api/events");
+  es.addEventListener("patches", (ev) => {
+    const data = JSON.parse(ev.data);
+    state.patches = data.patches || [];
+    renderPatches();
+  });
   es.addEventListener("state", (ev) => {
     const data = JSON.parse(ev.data);
     if (data.config) { applyState(data); return; }
