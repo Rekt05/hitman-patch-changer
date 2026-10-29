@@ -3,6 +3,7 @@
   "depotId": 1659041,
   "steamAppId": 1659040,
   "patches": [
+    { "id": "3.290.1", "version": "3.290.1", "steamManifestId": "4825366641951946410" },
     { "id": "3.280", "version": "3.280", "steamManifestId": "5408453574472182733" },
     { "id": "3.270.1", "version": "3.270.1", "steamManifestId": "8577875111335820028" },
     { "id": "3.270.0", "version": "3.270.0", "steamManifestId": "5604189710016205281" },
